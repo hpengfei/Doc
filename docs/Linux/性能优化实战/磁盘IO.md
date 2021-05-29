@@ -567,3 +567,382 @@ Got data: () in 0.004728794097900391 sec
 Got data: () in 0.00191497802734375 sec
 ```
 
+### 案例分析四
+
+运行测试案例：
+
+```
+# docker run --name=redis -itd -p 10000:80 feisky/redis-server
+# docker run --name=app --network=container:redis -itd feisky/redis-app
+```
+
+查看测试案例是否启动成功：
+
+```
+# curl http://192.168.120.88:10000
+hello redis
+```
+
+ 初始化 Redis 缓存，并且插入 5000 条缓存信息 ：
+
+```
+# curl http://192.168.120.88:10000/init/5000
+{"elapsed_seconds":3.914144277572632,"keys_initialized":5000}
+```
+
+查看运行时间：
+
+```
+# time curl http://192.168.120.88:10000/get_cache
+{"count":1717,"data":["6b002ff6-c06b-11eb-a142-0242ac145802",..."6a853cce-c06b-11eb-a142-0242ac145802"],"elapsed_seconds":2.681152820587158,"type":"good"}
+
+real    0m2.660s
+user    0m0.002s
+sys     0m0.004s
+```
+
+模拟用户请求
+
+```
+# while true; do curl http://192.168.120.88:10000/get_cache;sleep 1; done
+```
+
+top命令观察系统第一步：
+
+```
+top - 18:54:36 up  1:35,  2 users,  load average: 0.39, 0.12, 0.08
+Tasks: 125 total,   1 running, 124 sleeping,   0 stopped,   0 zombie
+%Cpu0  :  5.3 us,  3.3 sy,  0.0 ni, 90.8 id,  0.7 wa,  0.0 hi,  0.0 si,  0.0 st
+%Cpu1  :  3.4 us,  2.1 sy,  0.0 ni, 81.5 id, 12.9 wa,  0.0 hi,  0.0 si,  0.0 st
+KiB Mem :  7990288 total,  5958528 free,   414520 used,  1617240 buff/cache
+KiB Swap:  2097148 total,  2097148 free,        0 used.  7164164 avail Mem
+
+   PID USER      PR  NI    VIRT    RES    SHR S  %CPU %MEM     TIME+ COMMAND
+ 11647 100       20   0   28340   9100   1136 D  48.5  0.1   0:34.37 redis-server
+ 11722 root      20   0  113020  26492   5292 S  47.8  0.3   0:32.17 python
+ 10465 root      20   0       0      0      0 S   3.3  0.0   0:06.06 kworker/0:29
+  4252 root       0 -20       0      0      0 S   3.0  0.0   0:02.34 kworker/0:1H
+ 10490 root      20   0       0      0      0 S   1.3  0.0   0:01.07 kworker/1:1
+  8838 root      20   0   90392   3212   2348 S   1.0  0.0   0:03.02 rngd
+```
+
+通过top命令观察除了发现 wa 稍微搞点，未发现其它问题，下面使用dstat命令观察系统状态：
+
+```
+# dstat
+You did not select any stats, using -cdngy by default.
+----total-cpu-usage---- -dsk/total- -net/total- ---paging-- ---system--
+usr sys idl wai hiq siq| read  writ| recv  send|  in   out | int   csw
+  0   0  99   0   0   0|  84k  479k|   0     0 |   0     0 | 305   565
+  5   4  83   8   0   1|   0  2858k| 134k  102k|   0     0 |8166    16k
+  5   4  83   8   0   0|   0  3069k|  60B  166B|   0     0 |8477    17k
+  4   2  86   8   0   0|   0  2957k| 133k  102k|   0     0 |8409    17k
+  3   4  85   8   0   0|   0  2886k| 330B  798B|   0     0 |8100    16k
+  2   2  87   8   0   1|   0  3115k|  60B  134B|   0     0 |8501    17k
+  2   3  86   8   0   1|   0  2957k| 133k  102k|   0     0 |8379    17k
+  5   5  82   8   0   0|   0  3055k| 120B  530B|   0     0 |8513    17k
+  5   5  81   8   0   2|   0  3089k|  60B  134B|   0     0 |8465    17k
+
+```
+
+通过dstat命令能观测到当前系统有个持续写入的动作，并且系统的上下文切换有点高，但是系统的CPU使用率不高，只能怀疑系统的磁盘，下面使用iostat查看当前系统的io状况：
+
+```
+# iostat -x -d 1
+Linux 3.10.0-957.el7.x86_64 (localhost.localdomain)     05/29/2021      _x86_64_        (2 CPU)
+
+Device:         rrqm/s   wrqm/s     r/s     w/s    rkB/s    wkB/s avgrq-sz avgqu-sz   await r_await w_await  svctm  %util
+sda               0.01     8.75    2.15   28.99    84.03   491.03    36.93     0.04    1.30    0.80    1.34   0.14   0.42
+
+Device:         rrqm/s   wrqm/s     r/s     w/s    rkB/s    wkB/s avgrq-sz avgqu-sz   await r_await w_await  svctm  %util
+sda               0.00     0.00    1.00 1208.00     8.00  3060.50     5.08     0.12    0.10    1.00    0.10   0.10  12.10
+
+Device:         rrqm/s   wrqm/s     r/s     w/s    rkB/s    wkB/s avgrq-sz avgqu-sz   await r_await w_await  svctm  %util
+sda               0.00     0.00    0.00 1146.00     0.00  2901.50     5.06     0.13    0.11    0.00    0.11   0.11  12.80
+
+Device:         rrqm/s   wrqm/s     r/s     w/s    rkB/s    wkB/s avgrq-sz avgqu-sz   await r_await w_await  svctm  %util
+sda               0.00     0.00    0.00 1231.00     0.00  3116.00     5.06     0.10    0.09    0.00    0.09   0.09  10.50
+
+Device:         rrqm/s   wrqm/s     r/s     w/s    rkB/s    wkB/s avgrq-sz avgqu-sz   await r_await w_await  svctm  %util
+sda               0.00     0.00    0.00 1212.00     0.00  3066.00     5.06     0.10    0.09    0.00    0.09   0.08  10.10
+
+```
+
+通过iostat观察到当前系统是在做数据写入操作，但是并未达到磁盘写入的瓶颈。我们模拟的请求是读操作，而当前系统确实写操作居多，这个有点违背常理，下面使用pidstat查看当前系统使用磁盘的进程信息：
+
+```
+# pidstat -d 1
+Linux 3.10.0-957.el7.x86_64 (localhost.localdomain)     05/29/2021      _x86_64_        (2 CPU)
+
+06:55:50 PM   UID       PID   kB_rd/s   kB_wr/s kB_ccwr/s  Command
+06:55:51 PM   100     11647      0.00   2340.59      0.00  redis-server
+
+06:55:51 PM   UID       PID   kB_rd/s   kB_wr/s kB_ccwr/s  Command
+06:55:52 PM   100     11647      0.00   2452.00      0.00  redis-server
+
+06:55:52 PM   UID       PID   kB_rd/s   kB_wr/s kB_ccwr/s  Command
+06:55:53 PM   100     11647      0.00   2456.00      0.00  redis-server
+
+06:55:53 PM   UID       PID   kB_rd/s   kB_wr/s kB_ccwr/s  Command
+06:55:54 PM   100     11647      0.00   2316.00      0.00  redis-server
+```
+
+当前系统只有redis进程在做磁盘的写入操作，可以使用 strace+lsof 组合，看看 redis-server 到底在写什么 ：
+
+```
+# strace -f -T -tt -p 11647
+...
+[pid 11647] 18:56:32.648675 fdatasync(7) = 0 <0.000993>
+[pid 11647] 18:56:32.649861 write(8, ":1\r\n", 4) = 4 <0.000347>
+[pid 11647] 18:56:32.650437 epoll_pwait(5, [{EPOLLIN, {u32=8, u64=8}}], 10128, 62, NULL, 8) = 1 <0.000236>
+[pid 11647] 18:56:32.650871 read(8, "*2\r\n$3\r\nGET\r\n$41\r\nuuid:694fc004-"..., 16384) = 61 <0.000174>
+[pid 11647] 18:56:32.651260 read(3, 0x7ffe6df26427, 1) = -1 EAGAIN (Resource temporarily unavailable) <0.000218>
+[pid 11647] 18:56:32.651776 write(8, "$6\r\nnormal\r\n", 12) = 12 <0.000633>
+[pid 11647] 18:56:32.652893 epoll_pwait(5, [{EPOLLIN, {u32=8, u64=8}}], 10128, 60, NULL, 8) = 1 <0.000150>
+[pid 11647] 18:56:32.653179 read(8, "*4\r\n$4\r\nSCAN\r\n$4\r\n3847\r\n$5\r\nMATC"..., 16384) = 47 <0.000175>
+[pid 11647] 18:56:32.653576 read(3, 0x7ffe6df26427, 1) = -1 EAGAIN (Resource temporarily unavailable) <0.000194>
+[pid 11647] 18:56:32.653974 write(8, "*2\r\n$4\r\n2695\r\n*10\r\n$41\r\nuuid:697"..., 499) = 499 <0.000423>
+[pid 11647] 18:56:32.654679 epoll_pwait(5, [{EPOLLIN, {u32=8, u64=8}}], 10128, 58, NULL, 8) = 1 <0.000140>
+[pid 11647] 18:56:32.655020 read(8, "*2\r\n$3\r\nGET\r\n$41\r\nuuid:6979c21e-"..., 16384) = 61 <0.000174>
+[pid 11647] 18:56:32.655409 read(3, 0x7ffe6df26427, 1) = -1 EAGAIN (Resource temporarily unavailable) <0.000174>
+[pid 11647] 18:56:32.656073 write(8, "$6\r\nnormal\r\n", 12) = 12 <0.000310>
+[pid 11647] 18:56:32.656591 epoll_pwait(5, [{EPOLLIN, {u32=8, u64=8}}], 10128, 56, NULL, 8) = 1 <0.000093>
+[pid 11647] 18:56:32.656846 read(8, "*2\r\n$3\r\nGET\r\n$41\r\nuuid:699f847c-"..., 16384) = 61 <0.000182>
+[pid 11647] 18:56:32.657233 read(3, 0x7ffe6df26427, 1) = -1 EAGAIN (Resource temporarily unavailable) <0.000188>
+[pid 11647] 18:56:32.657690 write(8, "$4\r\ngood\r\n", 10) = 10 <0.000414>
+[pid 11647] 18:56:32.658364 epoll_pwait(5, [{EPOLLIN, {u32=8, u64=8}}], 10128, 54, NULL, 8) = 1 <0.000185>
+[pid 11647] 18:56:32.658748 read(8, "*3\r\n$4\r\nSADD\r\n$4\r\ngood\r\n$36\r\n699"..., 16384) = 67 <0.000426>
+[pid 11647] 18:56:32.659402 read(3, 0x7ffe6df26427, 1) = -1 EAGAIN (Resource temporarily unavailable) <0.000264>
+[pid 11647] 18:56:32.659854 write(7, "*3\r\n$4\r\nSADD\r\n$4\r\ngood\r\n$36\r\n699"..., 67) = 67 <0.000190>
+[pid 11647] 18:56:32.660278 fdatasync(7) = 0 <0.001054>
+...
+```
+
+从系统调用来看， epoll_pwait、read、write、fdatasync 这些系统调用都比较频繁。那么，刚才观察到的写磁盘，应该就是 write 或者 fdatasync 导致的了。
+
+ 运行 lsof 命令，找出这些系统调用的操作对象： 
+
+````
+# lsof -p 11647
+...
+COMMAND     PID     USER   FD      TYPE DEVICE SIZE/OFF     NODE NAME
+...
+redis-ser 11647      100  txt       REG   0,38  8191592 53609228 /usr/local/bin/redis-server
+...
+redis-ser 11647      100    6u     sock    0,7      0t0    70779 protocol: TCP
+lsof: no pwd entry for UID 100
+redis-ser 11647      100    7w      REG    8,3  9034658  1653995 /data/appendonly.aof
+lsof: no pwd entry for UID 100
+redis-ser 11647      100    8u     sock    0,7      0t0    71318 protocol: TCP
+````
+
+通过上面的数据可以找到redis在操作/data/appendonly.aof文件，运行下面的命令，查询 appendonly 和 appendfsync 的配置
+
+```
+# docker exec -it redis redis-cli config get 'append*'
+1) "appendfsync"
+2) "always"
+3) "appendonly"
+4) "yes"
+```
+
+ appendfsync  是用来设置 fsync 的策略配置选项如下：
+
+* always 表示，每个操作都会执行一次 fsync，是最为安全的方式；
+
+* everysec 表示，每秒钟调用一次 fsync ，这样可以保证即使是最坏情况下，也只丢失 1 秒的数据；
+
+* no 表示交给操作系统来处理。 
+
+ 可以用 strace 观察  fdatasync 系统调用的执行情况。比如通过 -e 选项指定 fdatasync 后，你就会得到下面的结果 ：
+
+```
+# strace -f -p 11647 -T -tt -e fdatasync
+strace: Process 11647 attached with 4 threads
+[pid 11647] 18:58:57.438566 fdatasync(7) = 0 <0.000897>
+[pid 11647] 18:58:57.442526 fdatasync(7) = 0 <0.000885>
+[pid 11647] 18:58:57.465135 fdatasync(7) = 0 <0.000817>
+[pid 11647] 18:58:57.468993 fdatasync(7) = 0 <0.000817>
+[pid 11647] 18:58:57.477399 fdatasync(7) = 0 <0.000881>
+[pid 11647] 18:58:57.486139 fdatasync(7) = 0 <0.000826>
+[pid 11647] 18:58:57.496163 fdatasync(7) = 0 <0.000757>
+[pid 11647] 18:58:57.511862 fdatasync(7) = 0 <0.000821>
+[pid 11647] 18:58:57.517263 fdatasync(7) = 0 <0.000847>
+```
+
+ 从这里你可以看到，每隔 10ms 左右，就会有一次 fdatasync 调用，并且每次调用本身也要消耗 7~8ms。 
+
+ 为什么查询时会有磁盘写呢？ 
+
+根据 lsof 的分析，文件描述符编号为 7 的是一个普通文件 /data/appendonly.aof，而编号为 8 的是 TCP socket。而观察上面的内容，8 号对应的 TCP 读写，是一个标准的“请求 - 响应”格式，即： 
+
+* 从 socket 读取 GET uuid:699f847c-… 后，响应 good；
+* 再从 socket 读取 SADD good 699… 后，响应 1。 
+
+对 Redis 来说，SADD 是一个写操作，所以 Redis 还会把它保存到用于持久化的 appendonly.aof 文件中。  观察更多的 strace 结果，你会发现，每当 GET 返回 good 时，随后都会有一个 SADD 操作，这也就导致了，明明是查询接口，Redis 却有大量的磁盘写。 
+
+由于程序运行在容器中可以通过 nsenter 查看容器中的信息：
+
+```
+# docker run --rm -v /usr/local/bin:/target jpetazzo/nsenter
+# PID=$(docker inspect --format {{.State.Pid}} app)
+# nsenter --target $PID --net -- lsof -i
+lsof: no pwd entry for UID 100
+lsof: no pwd entry for UID 100
+COMMAND     PID     USER   FD   TYPE DEVICE SIZE/OFF NODE NAME
+lsof: no pwd entry for UID 100
+redis-ser 11647      100    6u  IPv4  70779      0t0  TCP localhost:6379 (LISTEN)
+lsof: no pwd entry for UID 100
+redis-ser 11647      100    8u  IPv4  71318      0t0  TCP localhost:6379->localhost:56400 (ESTABLISHED)
+python    11722     root    3u  IPv4  72321      0t0  TCP *:http (LISTEN)
+python    11722     root    4u  IPv4  81583      0t0  TCP localhost.localdomain:http->192.168.120.74:42804 (ESTABLISHED)
+python    11722     root    5u  IPv4  72442      0t0  TCP localhost:56400->localhost:6379 (ESTABLISHED)
+```
+
+ 这次我们可以看到，redis-server 的 8 号文件描述符，对应 TCP 连接 localhost:6379->localhost:56400。其中， localhost:6379 是 redis-server 自己的监听端口，自然 localhost:56400就是 redis 的客户端。再观察最后一行，localhost:56400对应的，正是我们的 Python 应用程序（进程号为 11722）。 
+
+```
+# ps aux |grep 11722
+root      11722  3.3  0.3 113020 26604 pts/0    Ss+  18:47   4:34 python /app.py
+```
+
+总结一下，我们找到两个问题：
+
+* 第一个问题，Redis 配置的 appendfsync 是 always，这就导致 Redis 每次的写操作，都会触发 fdatasync 系统调用。今天的案例，没必要用这么高频的同步写，使用默认的 1s 时间间隔，就足够了。
+
+* 第二个问题，Python 应用在查询接口中会调用 Redis 的 SADD 命令，这很可能是不合理使用缓存导致的。 
+
+ 对于第一个配置问题，我们可以执行下面的命令，把 appendfsync 改成 everysec： 
+
+```
+# docker exec -it redis redis-cli config set appendfsync everysec
+OK
+```
+
+ 第二个问题，就要查看应用的源码了。 下面是解决第一个问题后接口请求响应时间：
+
+```
+# time curl http://192.168.120.88:10000/get_cache
+...
+real    0m1.710s
+user    0m0.000s
+sys     0m0.007s
+```
+
+## 优化思路
+
+### I/O 基准测试
+
+为了更客观合理地评估优化效果，我们首先应该对磁盘和文件系统进行基准测试，得到文件系统或者磁盘 I/O 的极限性能。fio  正是最常用的文件系统和磁盘 I/O 性能基准测试工具。它提供了大量的可定制化选项，可以用来测试，裸盘或者文件系统在各种场景下的 I/O 性能，包括了不同块大小、不同 I/O 引擎以及是否使用缓存等场景。 
+
+```
+# 随机读
+fio -name=randread -direct=1 -iodepth=64 -rw=randread -ioengine=libaio -bs=4k -size=1G -numjobs=1 -runtime=1000 -group_reporting -filename=/dev/sdb
+
+# 随机写
+fio -name=randwrite -direct=1 -iodepth=64 -rw=randwrite -ioengine=libaio -bs=4k -size=1G -numjobs=1 -runtime=1000 -group_reporting -filename=/dev/sdb
+
+# 顺序读
+fio -name=read -direct=1 -iodepth=64 -rw=read -ioengine=libaio -bs=4k -size=1G -numjobs=1 -runtime=1000 -group_reporting -filename=/dev/sdb
+
+# 顺序写
+fio -name=write -direct=1 -iodepth=64 -rw=write -ioengine=libaio -bs=4k -size=1G -numjobs=1 -runtime=1000 -group_reporting -filename=/dev/sdb 
+```
+
+* direct，表示是否跳过系统缓存。上面示例中，我设置的 1 ，就表示跳过系统缓存。
+* iodepth，表示使用异步 I/O（asynchronous I/O，简称 AIO）时，同时发出的 I/O 请求上限。在上面的示例中，我设置的是 64。
+* rw，表示 I/O 模式。我的示例中， read/write 分别表示顺序读 / 写，而 randread/randwrite 则分别表示随机读 / 写。
+* ioengine，表示 I/O 引擎，它支持同步（sync）、异步（libaio）、内存映射（mmap）、网络（net）等各种 I/O 引擎。上面示例中，我设置的 libaio 表示使用异步 I/O。
+* bs，表示 I/O 的大小。示例中，我设置成了 4K（这也是默认值）。
+* filename，表示文件路径，当然，它可以是磁盘路径（测试磁盘性能），也可以是文件路径（测试文件系统性能）。示例中，我把它设置成了磁盘 /dev/sdb。不过注意，用磁盘路径测试写，会破坏这个磁盘中的文件系统，所以在使用前，你一定要事先做好数据备份。 
+
+```
+# fio -name=read -direct=1 -iodepth=64 -rw=read -ioengine=libaio -bs=4k -size=1G -numjobs=1 -runtime=1000 -group_reporting -filename=/dev/sda
+read: (g=0): rw=read, bs=(R) 4096B-4096B, (W) 4096B-4096B, (T) 4096B-4096B, ioengine=libaio, iodepth=64
+fio-3.7
+Starting 1 process
+Jobs: 1 (f=1): [R(1)][100.0%][r=45.9MiB/s,w=0KiB/s][r=11.7k,w=0 IOPS][eta 00m:00s]
+read: (groupid=0, jobs=1): err= 0: pid=12698: Sat May 29 21:39:20 2021
+   read: IOPS=11.4k, BW=44.6MiB/s (46.8MB/s)(1024MiB/22964msec)
+    slat (nsec): min=1161, max=1509.7k, avg=83188.73, stdev=40849.26
+    clat (usec): min=2, max=19311, avg=5520.91, stdev=1696.11
+     lat (usec): min=91, max=19312, avg=5604.54, stdev=1723.52
+    clat percentiles (usec):
+     |  1.00th=[ 1254],  5.00th=[ 1778], 10.00th=[ 2147], 20.00th=[ 5014],
+     | 30.00th=[ 5932], 40.00th=[ 6128], 50.00th=[ 6194], 60.00th=[ 6390],
+     | 70.00th=[ 6390], 80.00th=[ 6456], 90.00th=[ 6587], 95.00th=[ 6652],
+     | 99.00th=[ 7570], 99.50th=[ 8717], 99.90th=[10683], 99.95th=[11994],
+     | 99.99th=[14877]
+   bw (  KiB/s): min=37285, max=109203, per=99.90%, avg=45615.22, stdev=17303.02, samples=45
+   iops        : min= 9321, max=27300, avg=11403.58, stdev=4325.72, samples=45
+  lat (usec)   : 4=0.01%, 100=0.01%, 250=0.01%, 500=0.01%, 750=0.01%
+  lat (usec)   : 1000=0.06%
+  lat (msec)   : 2=8.14%, 4=11.22%, 10=80.42%, 20=0.17%
+  cpu          : usr=3.32%, sys=95.52%, ctx=3763, majf=0, minf=98
+  IO depths    : 1=0.1%, 2=0.1%, 4=0.1%, 8=0.1%, 16=0.1%, 32=0.1%, >=64=100.0%
+     submit    : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.0%
+     complete  : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.1%, >=64=0.0%
+     issued rwts: total=262144,0,0,0 short=0,0,0,0 dropped=0,0,0,0
+     latency   : target=0, window=0, percentile=100.00%, depth=64
+
+Run status group 0 (all jobs):
+   READ: bw=44.6MiB/s (46.8MB/s), 44.6MiB/s-44.6MiB/s (46.8MB/s-46.8MB/s), io=1024MiB (1074MB), run=22964-22964msec
+
+Disk stats (read/write):
+  sda: ios=244920/36, merge=16345/11, ticks=59976/17, in_queue=59936, util=92.75%
+```
+
+* slat ，是指从 I/O 提交到实际执行 I/O 的时长（Submission latency）；
+* clat ，是指从 I/O 提交到 I/O 完成的时长（Completion latency）；
+* lat ，指的是从 fio 创建 I/O 到 I/O 完成的总时长。 
+* bw ，它代表吞吐量。 
+
+通常情况下，应用程序的 I/O 都是读写并行的，而且每次的 I/O 大小也不一定相同。所以，刚刚说的这几种场景，并不能精确模拟应用程序的 I/O 模式。 fio 支持 I/O 的重放。借助前面提到过的 blktrace，再配合上 fio，就可以实现对应用程序 I/O 模式的基准测试。你需要先用 blktrace ，记录磁盘设备的 I/O 访问情况；然后使用 fio ，重放 blktrace 的记录。 
+
+```
+
+# 使用blktrace跟踪磁盘I/O，注意指定应用程序正在操作的磁盘
+$ blktrace /dev/sdb
+
+# 查看blktrace记录的结果
+# ls
+sdb.blktrace.0  sdb.blktrace.1
+
+# 将结果转化为二进制文件
+$ blkparse sdb -d sdb.bin
+
+# 使用fio重放日志
+$ fio --name=replay --filename=/dev/sdb --direct=1 --read_iolog=sdb.bin 
+```
+
+###  应用程序优化
+
+* 第一，可以用追加写代替随机写，减少寻址开销，加快 I/O 写的速度。
+* 第二，可以借助缓存 I/O ，充分利用系统缓存，降低实际 I/O 的次数。
+* 第三，可以在应用程序内部构建自己的缓存，或者用 Redis 这类外部缓存系统。这样，一方面，能在应用程序内部，控制缓存的数据和生命周期；另一方面，也能降低其他应用程序使用缓存对自身的影响。 
+
+* 第四，在需要频繁读写同一块磁盘空间时，可以用 mmap 代替 read/write，减少内存的拷贝次数。 
+* 第五，在需要同步写的场景中，尽量将写请求合并，而不是让每个请求都同步写入磁盘，即可以用 fsync() 取代 O_SYNC。 
+
+* 第六，在多个应用程序共享相同磁盘时，为了保证 I/O 不被某个应用完全占用，推荐你使用 cgroups 的 I/O 子系统，来限制进程 / 进程组的 IOPS 以及吞吐量。 
+
+*  最后，在使用 CFQ 调度器时，可以用 ionice 来调整进程的 I/O 调度优先级，特别是提高核心应用的 I/O 优先级。ionice 支持三个优先级类：Idle、Best-effort 和 Realtime。其中， Best-effort 和 Realtime 还分别支持 0-7 的级别，数值越小，则表示优先级别越高。 
+
+###  文件系统优化 
+
+*  第一，你可以根据实际负载场景的不同，选择最适合的文件系统。  相比于 ext4 ，xfs 支持更大的磁盘分区和更大的文件数量，如 xfs 支持大于 16TB 的磁盘。但是 xfs 文件系统的缺点在于无法收缩，而 ext4 则可以。 
+*  第二，在选好文件系统后，还可以进一步优化文件系统的配置选项，包括文件系统的特性（如 ext_attr、dir_index）、日志模式（如 journal、ordered、writeback）、挂载选项（如 noatime）等等。  比如， 使用 tune2fs 这个工具，可以调整文件系统的特性（tune2fs 也常用来查看文件系统超级块的内容）。 
+* 第三，可以优化文件系统的缓存。  比如，你可以优化 pdflush 脏页的刷新频率（比如设置 dirty_expire_centisecs 和 dirty_writeback_centisecs）以及脏页的限额（比如调整 dirty_background_ratio 和 dirty_ratio 等）。  再如，你还可以优化内核回收目录项缓存和索引节点缓存的倾向，即调整 vfs_cache_pressure（/proc/sys/vm/vfs_cache_pressure，默认值 100），数值越大，就表示越容易回收。 
+* 最后，在不需要持久化时，你还可以用内存文件系统 tmpfs，以获得更好的 I/O 性能 。tmpfs 把数据直接保存在内存中，而不是磁盘中。比如 /dev/shm/ ，就是大多数 Linux 默认配置的一个内存文件系统，它的大小默认为总内存的一半。 
+
+###  磁盘优化 
+
+* 第一，最简单有效的优化方法，就是换用性能更好的磁盘，比如用 SSD 替代 HDD。
+* 第二，我们可以使用 RAID ，把多块磁盘组合成一个逻辑磁盘，构成冗余独立磁盘阵列。这样做既可以提高数据的可靠性，又可以提升数据的访问性能。
+* 第三，针对磁盘和应用程序 I/O 模式的特征，我们可以选择最适合的 I/O 调度算法。比方说，SSD 和虚拟机中的磁盘，通常用的是 noop 调度算法。而数据库应用，我更推荐使用 deadline 算法。
+* 第四，我们可以对应用程序的数据，进行磁盘级别的隔离。比如，我们可以为日志、数据库等 I/O 压力比较重的应用，配置单独的磁盘。
+* 第五，在顺序读比较多的场景中，我们可以增大磁盘的预读数据，比如，你可以通过下面两种方法，调整 /dev/sdb 的预读大小。 
+  *  调整内核选项 /sys/block/sdb/queue/read_ahead_kb，默认大小是 128 KB，单位为 KB。 
+  *  使用 blockdev 工具设置，比如 blockdev --setra 8192 /dev/sdb，注意这里的单位是 512B（0.5KB），所以它的数值总是 read_ahead_kb 的两倍。 
+*  第六，我们可以优化内核块设备 I/O 的选项。比如，可以调整磁盘队列的长度 /sys/block/sdb/queue/nr_requests，适当增大队列长度，可以提升磁盘的吞吐量（当然也会导致 I/O 延迟增大）。 
+* 最后，要注意，磁盘本身出现硬件错误，也会导致 I/O 性能急剧下降，所以发现磁盘性能急剧下降时，你还需要确认，磁盘本身是不是出现了硬件错误。  比如，你可以查看 dmesg 中是否有硬件 I/O 故障的日志。 还可以使用 badblocks、smartctl 等工具，检测磁盘的硬件问题，或用 e2fsck 等来检测文件系统的错误。如果发现问题，你可以使用 fsck 等工具来修复。 
