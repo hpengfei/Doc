@@ -104,8 +104,6 @@ SYSLOGBASE %{SYSLOGTIMESTAMP:timestamp} (?:%{SYSLOGFACILITY} )?%{SYSLOGHOST:logs
 LOGLEVEL ([Aa]lert|ALERT|[Tt]race|TRACE|[Dd]ebug|DEBUG|[Nn]otice|NOTICE|[Ii]nfo|INFO|[Ww]arn?(?:ing)?|WARN?(?:ING)?|[Ee]rr?(?:or)?|ERR?(?:OR)?|[Cc]rit?(?:ical)?|CRIT?(?:ICAL)?|[Ff]atal|FATAL|[Ss]evere|SEVERE|EMERG(?:ENCY)?|[Ee]merg(?:ency)?)
 ```
 
-
-
 配置演示
 
 ```
@@ -113,12 +111,35 @@ LOGLEVEL ([Aa]lert|ALERT|[Tt]race|TRACE|[Dd]ebug|DEBUG|[Nn]otice|NOTICE|[Ii]nfo|
 ```
 
 ```
-
 filter{
   grok{
     match => {
       "message" => "(?<reqtime>.*?)\|%{IP:distanceip}\|(?<appid>.*?)\|(?<channelID>.*?)\|(?<requrl>.*?)\|(?<referer>.*?)\|%{IP:realip}\|(?<accountNo>.*?)\|(?<ua>.*?)\|(?<sessionID>.*?)\|(?<cookieID>.*?)\|(?<accessSource>.*?)\|(?<version>.*?)\|(?<uid>.*)\|(?<url_key>.*?)\|(?<url_group>.*?)\|(?<mkid>.*?)\|(?<nettype>.*?)\|(?<imeiid>.*?)\|(?<imsiid>.*?)\|(?<netOperator>.*?)"
     }
+}
+```
+
+kafka数据输出到es
+
+```
+input {
+  kafka {
+    bootstrap_servers =>"10.10.10.232:9092,10.10.10.233:9092,10.10.10.234:9092"
+    security_protocol => "SASL_PLAINTEXT"
+    sasl_mechanism => "PLAIN"
+    auto_offset_reset=>"earliest"
+    codec => "json"
+    consumer_threads => 2
+    topics=>["micro-logs"]
+    group_id=>"gray-sender"
+    sasl_jaas_config => "org.apache.kafka.common.security.plain.PlainLoginModule required username='xxx'  password='xxx';"
+  }
+}
+output {
+      elasticsearch {
+          hosts => [ "http://np-es-01:9200","http://np-es-02:9200","http://np-es-03:9200" ]
+          index => "micro-logs-%{+yyyy.MM.dd}"
+     }
 }
 ```
 

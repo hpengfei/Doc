@@ -350,7 +350,25 @@ WARNING: Due to limitations in metric names, topics with a period ('.') or under
 Created topic kafka_topic_test.
 ```
 
-#### 权限管理
+#### 用户权限管理
+
+查询所有组：
+
+```
+# egrep -v "^#|^$" /opt/kafka/config/consumer.properties
+security.protocol=SASL_PLAINTEXT
+sasl.mechanism=PLAIN
+```
+
+```
+# ./kafka-consumer-groups.sh --bootstrap-server 10.10.10.232:9092,10.10.10.233:9092,10.10.10.234:9092 --list --command-config /opt/kafka/config/consumer.properties
+```
+
+查询指定组详细信息：
+
+```
+# ./kafka-consumer-groups.sh --bootstrap-server 10.10.10.232:9092,10.10.10.233:9092,10.10.10.234:9092 --command-config /opt/kafka/config/consumer.properties   --describe --group gray-sender
+```
 
 添加读写权限：
 
