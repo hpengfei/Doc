@@ -5,8 +5,8 @@
 在通过 node_exporter 暴露的HTTP服务，Prometheus可以采集到当前主机所有监控指标的样本数据。例如：
 
 ```
-# HELP node_cpu_seconds_total Seconds the CPUs spent in each mode.
-# TYPE node_cpu_seconds_total counter
+# HELP node_cpu_seconds_total Seconds the CPUs spent in each mode.  # HELP <metrics_name> <doc_string>
+# TYPE node_cpu_seconds_total counter                               # TYPE <metrics_name> <metrics_type>
 node_cpu_seconds_total{cpu="0",mode="idle"} 175210.6
 node_cpu_seconds_total{cpu="0",mode="iowait"} 20.15
 ```
