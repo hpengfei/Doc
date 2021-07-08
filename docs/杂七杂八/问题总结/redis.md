@@ -28,14 +28,23 @@ AOF持久化以日志的形式记录服务器所处理的每一个写、删除�
 
 当使用volatile-lru、volatile-random、volatile-ttl这三种策略时，如果没有key可以被淘汰，则和noeviction一样返回错误
 
->  redis集群的原理，redis分片是怎么实现的，你们公司redis用在了哪些环境？ 
-
-
-
-
-
 > redis 有哪些数据结构
 
 Redis 有 5 种基础数据结构，它们分别是：string(字符串)、list(列表)、hash(字典)、set(集合) 和 zset(有序集合)。
 
 https://www.wmyskxz.com/2020/02/28/redis-1-5-chong-ji-ben-shu-ju-jie-gou/
+
+> 假如你的Redis内存满了会出现什么情况？如何处理？
+
+内存满了redis 对于写请求不再提供服务，直接返回错误（DEL请求和部分特殊请求除外）
+
+可以在配置文件中增加 `maxmemory` 内存大小，具体大小根据主机情况配置。
+
+同时将  `maxmemory-policy noeviction` 设置成 `maxmemory-policy  allkeys-lru`
+
+```
+config get maxmemory-policy   # 查看当前配置策略
+config set maxmemory-policy allkeys-lru  # 修改策略
+```
+
+> redis集群的原理，redis分片是怎么实现的，你们公司redis用在了哪些环境？ 
